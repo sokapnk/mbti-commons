@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MBTI Commons</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: #0f0f23; color: #fff; padding: 20px; max-width: 500px; margin: 0 auto; line-height: 1.6; }
+    h1 { color: #00ff88; font-size: 1.5rem; margin-bottom: 0.5rem; }
+    .subtitle { color: #888; font-size: 0.875rem; margin-bottom: 1.5rem; }
+    .card { background: #1a1a2e; padding: 20px; border-radius: 12px; margin-bottom: 16px; }
+    label { display: block; color: #aaa; font-size: 0.875rem; margin-bottom: 6px; }
+    input, select { width: 100%; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #0f0f23; color: #fff; font-size: 1rem; margin-bottom: 12px; }
+    input:focus, select:focus { outline: none; border-color: #00ff88; }
+    .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 16px; }
+    .type-btn { padding: 10px 4px; border: 1px solid #333; background: #0f0f23; color: #fff; border-radius: 6px; cursor: pointer; font-size: 0.875rem; font-weight: 600; }
+    .type-btn:hover { border-color: #00ff88; }
+    .type-btn.active { background: #00ff88; color: #0f0f23; border-color: #00ff88; }
+    button { width: 100%; padding: 14px; background: #00ff88; color: #0f0f23; border: none; border-radius: 8px; font-size: 1rem; font-weight: bold; cursor: pointer; }
+    button:hover { background: #00cc6a; }
+    .secondary { background: #333; color: #fff; margin-top: 8px; }
+    .secondary:hover { background: #444; }
+    .entry { display: flex; justify-content: space-between; align-items: center; padding: 12px; background: #0f0f23; border-radius: 8px; margin-bottom: 8px; }
+    .entry-name { font-weight: 600; color: #fff; }
+    .badge { background: #00ff88; color: #0f0f23; padding: 4px 10px; border-radius: 4px; font-family: monospace; font-weight: bold; font-size: 0.875rem; }
+    .time { color: #666; font-size: 0.75rem; }
+    .empty { text-align: center; color: #666; padding: 40px; }
+    .status { position: fixed; top: 10px; right: 10px; background: #1a1a2e; padding: 8px 16px; border-radius: 20px; font-size: 0.75rem; color: #00ff88; }
+    .peers { color: #888; }
+  </style>
+</head>
+<body>
+  <div class="status" id="status">🟢 <span id="peers">0 peers</span></div>
+  
+  <h1>🧠 MBTI Commons</h1>
+  <p class="subtitle">Decentralized personality type sharing</p>
+
+  <div class="card">
+    <form id="form">
+      <label>Your Name</label>
+      <input type="text" id="name" placeholder="Enter name" required autocomplete="name">
+      
+      <label>Your Type</label>
+      <div class="grid" id="types"></div>
+      <input type="hidden" id="type" required>
+      
+      <button type="submit" id="submit">Add to Commons</button>
+      <button type="button" class="secondary" onclick="download()">📥 Download CSV</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <label>Entries (<span id="count">0</span>)</label>
+    <div id="entries"><div class="empty">No entries yet. Be first!</div></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/gun@0.2020.1238/gun.js"></script>
+  <script>
+    const types = ['INTJ','INTP','ENTJ','ENTP','INFJ','INFP','ENFJ','ENFP','ISTJ','ISFJ','ESTJ','ESFJ','ISTP','ISFP','ESTP','ESFP'];
+    const gun = Gun(['https://gun-manhattan.herokuapp.com/gun','https://gun-us.herokuapp.com/gun']);
+    const node = gun.get('mbti-commons-v2');
+    const entries = new Map();
+    let myType = localStorage.getItem('myType') || '';
+    let myName = localStorage.getItem('myName') || '';
+    let peers = 0;
+
+    // Render type buttons
+    document.getElementById('types').innerHTML = types.map(t => 
+      `<button type="button" class="type-btn ${t===myType?'active':''}" data-type="${t}">${t}</button>`
+    ).join('');
+
+    // Type selection
+    document.querySelectorAll('.type-btn').forEach(btn => {
+      btn.onclick = () => {
+        document.querySelectorAll('.type-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById('type').value = btn.dataset.type;
+      };
+    });
+
+    // Pre-fill form
+    document.getElementById('name').value = myName;
+    if(myType) document.getElementById('type').value = myType;
+
+    // Submit
+    document.getElementById('form').onsubmit = e => {
+      e.preventDefault();
+      const name = document.getElementById('name').value.trim();
+      const type = document.getElementById('type').value;
+      if(!name || !type) return alert('Name and type required');
+      
+      const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
+      node.get(id).put({name, type, time: Date.now()});
+      
+      localStorage.setItem('myName', name);
+      localStorage.setItem('myType', type);
+      myName = name;
+      myType = type;
+      
+      document.getElementById('submit').textContent = 'Updated!';
+      setTimeout(() => document.getElementById('submit').textContent = 'Add to Commons', 1000);
+    };
+
+    // Listen for entries
+    node.map().on((data, id) => {
+      if(!data || !data.name) return;
+      entries.set(id, data);
+      render();
+    });
+
+    // Peer counting
+    gun.on('hi', () => { peers++; updatePeers(); });
+    gun.on('bye', () => { peers = Math.max(0, peers-1); updatePeers(); });
+
+    function updatePeers() {
+      document.getElementById('peers').textContent = peers + ' peers';
+    }
+
+    function render() {
+      const list = Array.from(entries.values()).sort((a,b) => b.time - a.time);
+      document.getElementById('count').textContent = list.length;
+      
+      if(list.length === 0) return;
+      
+      document.getElementById('entries').innerHTML = list.map(e => `
+        <div class="entry">
+          <div>
+            <div class="entry-name">${escape(e.name)}</div>
+            <div class="time">${ago(e.time)}</div>
+          </div>
+          <span class="badge">${e.type}</span>
+        </div>
+      `).join('');
+    }
+
+    function escape(s) {
+      const d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    function ago(t) {
+      const s = Math.floor((Date.now()-t)/1000);
+      if(s<60) return 'now';
+      if(s<3600) return Math.floor(s/60)+'m';
+      if(s<86400) return Math.floor(s/3600)+'h';
+      return Math.floor(s/86400)+'d';
+    }
+
+    function download() {
+      if(entries.size === 0) return alert('No entries to download');
+      const csv = 'Name,MBTI,Timestamp\n' + 
+        Array.from(entries.values()).map(e => 
+          `"${e.name.replace(/"/g,'""')}",${e.type},${e.time}`
+        ).join('\n');
+      const blob = new Blob([csv], {type:'text/csv'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `mbti-commons-${new Date().toISOString().split('T')[0]}.csv`;
+      a.click();
+    }
+  </script>
+</body>
+</html>
